@@ -3,3 +3,6 @@
 *.pyc
 __pycache__/
 *.ipynb_checkpoints/
+
+# ignore output directories
+preprocess_img/img_preprocess_output/
