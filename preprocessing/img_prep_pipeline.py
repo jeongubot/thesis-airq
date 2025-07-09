@@ -86,8 +86,6 @@ def main():
             process_day(day_folder, patch_meta, resize_meta)
     pd.DataFrame(patch_meta).to_csv(PATCH_META, index=False)
     pd.DataFrame(resize_meta).to_csv(RESIZE_META, index=False)
-    print(f"Patch metadata → {PATCH_META}, {len(patch_meta)} entries")
-    print(f"Resize metadata → {RESIZE_META}, {len(resize_meta)} entries")
 
 if __name__=='__main__':
     main()

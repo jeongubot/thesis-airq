@@ -5,6 +5,11 @@
 __pycache__/
 *.ipynb_checkpoints/
 
-dataset/a_raw/
-dataset/e_preprocessed_img/
+dataset/a_raw/7_24_data/
+dataset/a_raw/10_19_data/
+dataset/a_raw/11_10_data/
+
+dataset/e_preprocessed_img/7_24_data/
+dataset/e_preprocessed_img/10_19_data/
+dataset/e_preprocessed_img/11_10_data/
 
