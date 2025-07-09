@@ -4,3 +4,7 @@
 *.pyc
 __pycache__/
 *.ipynb_checkpoints/
+
+dataset/a_raw/
+dataset/e_preprocessed_img/
+
