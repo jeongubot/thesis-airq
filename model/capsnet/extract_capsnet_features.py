@@ -8,7 +8,7 @@ import os
 from tqdm import tqdm
 
 # === CONFIG ===
-INPUT_CSV = 'data_matching/matched_image_tabular.csv'
+INPUT_CSV = 'data_matching/train_split.csv'
 OUTPUT_FEATURES_CSV = 'data_matching/capsnet_features.csv'
 BATCH_SIZE = 32
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'

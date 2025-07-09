@@ -1,7 +1,6 @@
 *.tar
+*.tar.gz
 *.zip
 *.pyc
 __pycache__/
 *.ipynb_checkpoints/
-
-preprocess_img/img_preprocess_output/
