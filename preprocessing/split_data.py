@@ -1,10 +1,8 @@
 import os
 import pandas as pd
-from sklearn.model_selection import train_test_split
 
 MATCHED_DIR = 'dataset/c_matched_spatio_temporal_data'
 SPLIT_DIR   = 'dataset/d_data_split'
-RANDOM_SEED = 42
 
 csv_files = [f for f in os.listdir(MATCHED_DIR) if f.endswith('.csv')]
 
@@ -17,21 +15,19 @@ for csv_filename in csv_files:
     df = pd.read_csv(input_csv)
     print(f"{day}: Loaded {len(df)} rows. Columns: {df.columns.tolist()}")
 
-    # 1st split: train (70%) vs temp (30%)
-    train_df, temp_df = train_test_split(
-        df,
-        test_size=0.3,
-        random_state=RANDOM_SEED
-    )
+    # Sort by location and timestamp for proper time series split
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df = df.sort_values(['location', 'timestamp']).reset_index(drop=True)
 
-    # 2nd split: val (10%) and test (20%) from temp (which is 30% of total)
-    val_df, test_df = train_test_split(
-        temp_df,
-        test_size=2/3,  # 2/3 of 30% = 20% of total, 1/3 = 10%
-        random_state=RANDOM_SEED
-    )
+    n = len(df)
+    n_test = int(n * 0.2)
+    n_val = int(n * 0.1)
+    n_train = n - n_test - n_val
 
-    # Save splits in the subfolder
+    train_df = df.iloc[:n_train]
+    val_df   = df.iloc[n_train:n_train+n_val]
+    test_df  = df.iloc[n_train+n_val:]
+
     train_df.to_csv(os.path.join(subfolder, "train.csv"), index=False)
     val_df.to_csv(os.path.join(subfolder, "val.csv"), index=False)
     test_df.to_csv(os.path.join(subfolder, "test.csv"), index=False)
