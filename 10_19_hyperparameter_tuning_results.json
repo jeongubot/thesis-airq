@@ -1,0 +1,59 @@
+[
+  {
+    "combination": 1,
+    "params": {
+      "hidden_size": 32,
+      "num_layers": 2,
+      "dropout": 0.3,
+      "activation": "relu",
+      "learning_rate": 0.01,
+      "batch_size": 64,
+      "epochs": 4
+    },
+    "val_loss": 42.49382892980711,
+    "mse": 42.49547576904297,
+    "mae": 4.371595859527588,
+    "rmse": 6.518855571746826,
+    "r2": -0.007537877273020577,
+    "epochs_trained": 4,
+    "training_time": 51.41173243522644
+  },
+  {
+    "combination": 2,
+    "params": {
+      "hidden_size": 64,
+      "num_layers": 2,
+      "dropout": 0.3,
+      "activation": "tanh",
+      "learning_rate": 0.001,
+      "batch_size": 32,
+      "epochs": 4
+    },
+    "val_loss": 42.232279415913794,
+    "mse": 60.15888977050781,
+    "mae": 6.421234130859375,
+    "rmse": 7.756216049194336,
+    "r2": -0.4263248710484071,
+    "epochs_trained": 4,
+    "training_time": 104.66153025627136
+  },
+  {
+    "combination": 3,
+    "params": {
+      "hidden_size": 128,
+      "num_layers": 2,
+      "dropout": 0.3,
+      "activation": "relu",
+      "learning_rate": 0.001,
+      "batch_size": 8,
+      "epochs": 4
+    },
+    "val_loss": 44.63753126019945,
+    "mse": 52.656463623046875,
+    "mae": 6.066164970397949,
+    "rmse": 7.256477355957031,
+    "r2": -0.2484476946112355,
+    "epochs_trained": 4,
+    "training_time": 453.3753910064697
+  }
+]
