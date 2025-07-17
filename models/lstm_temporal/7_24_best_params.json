@@ -1,0 +1,13 @@
+{
+  "hidden_size": 32,
+  "num_layers": 1,
+  "dropout": 0.2,
+  "activation": "tanh",
+  "learning_rate": 0.0001,
+  "batch_size": 64,
+  "epochs": 1,
+  "timesteps": 60,
+  "weight_decay": 0.0001,
+  "grad_clip": 0.5,
+  "lstm_dropout": 0.1
+}
