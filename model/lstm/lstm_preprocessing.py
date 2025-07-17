@@ -6,7 +6,7 @@ import os
 # Define possible features (use only those present in the data)
 POSSIBLE_FEATURES = ['pm2.5', 'pm10', 'temperature', 'humidity']
 TARGET_COL = 'pm2.5'
-TIMESTEPS = 10
+TIMESTEPS = 60 
 
 def get_available_features(df):
     # Use only features present in the dataframe and not the target

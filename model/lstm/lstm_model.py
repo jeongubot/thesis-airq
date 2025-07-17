@@ -63,13 +63,13 @@ class LSTMHyperparameterTuner:
     def __init__(self):
         # Define hyperparameter search space
         self.hyperparameter_space = {
-            'hidden_size': [32, 64, 128],
+            'hidden_size': [32, 64, 128, 256],
             'num_layers': [1, 2, 3],
-            'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
-            'activation': ['relu', 'tanh'],
+            'dropout': [0.1, 0.2, 0.3, 0.5],
+            'activation': ['relu', 'tanh', 'leaky_relu', 'gelu'],
             'learning_rate': [0.0001, 0.001, 0.01, 0.1],
             'batch_size': [8, 16, 32, 64],
-            'epochs': [3,4]
+            'epochs': [5, 10]
         }
         
         self.best_params = {}
@@ -143,7 +143,8 @@ class LSTMHyperparameterTuner:
             
             # Training loop with early stopping
             best_val_loss = float('inf')
-            patience = 15
+            total_epochs = params['epochs']
+            patience = int(0.2 * total_epochs)
             patience_counter = 0
             
             for epoch in range(params['epochs']):
@@ -173,6 +174,13 @@ class LSTMHyperparameterTuner:
                 
                 train_loss /= len(train_loader)
                 val_loss /= len(val_loader)
+
+                # Print progress bar
+                bar_length = 30
+                percent = (epoch + 1) / 100
+                filled_length = int(bar_length * percent)
+                bar = '=' * filled_length + '-' * (bar_length - filled_length)
+                print(f"\rEpoch {epoch+1}/100 [{bar}] loss: {val_loss:.4f}", end='')
                 
                 # Early stopping check
                 if val_loss < best_val_loss:
@@ -381,6 +389,13 @@ def train_optimized_lstm(X_train, y_train, X_val, y_val, input_size,
             
             train_loss /= len(train_loader)
             val_loss /= len(val_loader)
+
+            # Print progress bar
+            bar_length = 30
+            percent = (epoch + 1) / 100
+            filled_length = int(bar_length * percent)
+            bar = '=' * filled_length + '-' * (bar_length - filled_length)
+            print(f"\rEpoch {epoch+1}/100 [{bar}] loss: {val_loss:.4f}", end='')
             
             if epoch % 10 == 0:
                 print(f'Epoch {epoch}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}')
