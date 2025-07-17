@@ -244,13 +244,15 @@ class TemporalDataLoader:
         
         return temporal_data, targets, available_features
 
-def hyperparameter_tuning_lstm(day, max_combinations=10):
+def hyperparameter_tuning_lstm(day, max_combinations=1):
     """
     Separate hyperparameter tuning for LSTM component
     This should be run once per day to find optimal parameters
     
     IMPORTANT: Uses only the 80% learning set for tuning
     The 20% hold-out test set remains completely untouched
+    
+    This is SEPARATE from the 5-fold CV - it's just for finding best LSTM params
     """
     hyperparameter_space = {
         # LSTM Architecture
@@ -290,22 +292,21 @@ def hyperparameter_tuning_lstm(day, max_combinations=10):
     learning_temporal = temporal_data[:n_learning]  # 80% learning set only
     learning_targets = targets[:n_learning]
     
-    # Split the 80% learning set into train/validation for hyperparameter tuning
-    # Use 70% of total for training, 10% of total for validation (as per pipeline requirements)
-    n_train = int(n_total * 0.7)  # 70% of total data
-    n_val = int(n_total * 0.1)    # 10% of total data
+    # For hyperparameter tuning, split the 80% learning set into 64% train, 16% val
+    # This is DIFFERENT from the 5-fold CV splits
+    n_tune_train = int(n_learning * 0.8)  # 64% of total (80% of 80%)
     
-    train_temporal = learning_temporal[:n_train]           # 70% of total
-    train_targets = learning_targets[:n_train]
-    val_temporal = learning_temporal[n_train:n_train + n_val]  # 10% of total
-    val_targets = learning_targets[n_train:n_train + n_val]
+    tune_train_temporal = learning_temporal[:n_tune_train]       # 64% of total
+    tune_train_targets = learning_targets[:n_tune_train]
+    tune_val_temporal = learning_temporal[n_tune_train:]         # 16% of total
+    tune_val_targets = learning_targets[n_tune_train:]
     
-    print(f"Data split for hyperparameter tuning:")
+    print(f"Data split for hyperparameter tuning (separate from 5-fold CV):")
     print(f"  Total samples: {n_total}")
     print(f"  Learning set (used): {n_learning} ({n_learning/n_total*100:.1f}%)")
     print(f"  Hold-out test (untouched): {n_total - n_learning} ({(n_total - n_learning)/n_total*100:.1f}%)")
-    print(f"  Train for tuning: {len(train_temporal)} ({len(train_temporal)/n_total*100:.1f}%)")
-    print(f"  Val for tuning: {len(val_temporal)} ({len(val_temporal)/n_total*100:.1f}%)")
+    print(f"  Tune train: {len(tune_train_temporal)} ({len(tune_train_temporal)/n_total*100:.1f}%)")
+    print(f"  Tune val: {len(tune_val_temporal)} ({len(tune_val_temporal)/n_total*100:.1f}%)")
     
     # Generate parameter combinations
     keys = list(hyperparameter_space.keys())
@@ -335,11 +336,12 @@ def hyperparameter_tuning_lstm(day, max_combinations=10):
         try:
             # Train and get validation features (using only learning set)
             train_features, val_features, train_y, val_len = lstm_gen.train_and_extract_features(
-                train_temporal, train_targets, val_temporal, val_targets, timesteps=params.get('timesteps', 60)
+                tune_train_temporal, tune_train_targets, tune_val_temporal, tune_val_targets, 
+                timesteps=params.get('timesteps', 60)
             )
             
             # Simple validation: predict using temporal features
-            val_y = val_targets[params.get('timesteps', 60):]  # Account for sequence length
+            val_y = tune_val_targets[params.get('timesteps', 60):]  # Account for sequence length
             if len(val_y) == len(val_features):
                 # Use simple linear regression for validation
                 from sklearn.linear_model import LinearRegression
@@ -416,42 +418,73 @@ def main():
     
     # Example usage for integration team
     print("\n" + "="*80)
-    print("EXAMPLE USAGE FOR INTEGRATION TEAM:")
+    print("CORRECT 5-FOLD CV INTEGRATION:")
     print("="*80)
     print("""
-# In your full pipeline cross-validation script:
+# PHASE 1: Hyperparameter Tuning (run once per day)
+from lstm_temporal_feature_generator import hyperparameter_tuning_lstm
+best_params = hyperparameter_tuning_lstm('7_24', max_combinations=10)
 
+# PHASE 2: 5-Fold Cross-Validation (main pipeline)
 from lstm_temporal_feature_generator import LSTMTemporalFeatureGenerator, TemporalDataLoader
-
-# Load best parameters
-with open('models/lstm_temporal/7_24_best_params.json', 'r') as f:
-    best_params = json.load(f)
+from sklearn.model_selection import TimeSeriesSplit
 
 # Initialize components
 data_loader = TemporalDataLoader()
 lstm_generator = LSTMTemporalFeatureGenerator(best_params)
 
-# For each CV fold:
-for fold in range(5):
-    # Get temporal data for this fold
-    temporal_data, targets, _ = data_loader.load_temporal_data('7_24')
+# Load data and split into learning (80%) and hold-out (20%)
+temporal_data, targets, _ = data_loader.load_temporal_data('7_24')
+n_total = len(temporal_data)
+n_learning = int(n_total * 0.8)
+
+learning_temporal = temporal_data[:n_learning]  # 80% learning set
+learning_targets = targets[:n_learning]
+holdout_temporal = temporal_data[n_learning:]   # 20% hold-out (untouched)
+holdout_targets = targets[n_learning:]
+
+# 5-Fold TimeSeriesSplit on 80% learning set
+tscv = TimeSeriesSplit(n_splits=5)
+fold_scores = []
+
+for fold, (train_idx, val_idx) in enumerate(tscv.split(learning_temporal)):
+    print(f"Fold {fold + 1}/5")
     
-    # Split data for this fold (train/val indices from CV within learning set)
-    train_temporal = temporal_data[train_idx]
-    val_temporal = temporal_data[val_idx]
-    train_targets = targets[train_idx]
-    val_targets = targets[val_idx]
+    # Split data for this fold (expanding window)
+    train_temporal = learning_temporal[train_idx]  # Growing train set
+    val_temporal = learning_temporal[val_idx]      # Fixed-size val set
+    train_targets = learning_targets[train_idx]
+    val_targets = learning_targets[val_idx]
     
-    # Extract temporal features
+    # Extract temporal features for this fold
     train_temp_features, val_temp_features, _, _ = lstm_generator.train_and_extract_features(
         train_temporal, train_targets, val_temporal, val_targets
     )
     
-    # Combine with spatial features and train full model
-    # ... (CapsNet/CNN + LightGBM integration)
+    # Extract spatial features (CapsNet/CNN)
+    train_spatial_features, val_spatial_features = capsnet_generator.train_and_extract_features(
+        train_images, train_targets, val_images, val_targets
+    )
     
-    # Evaluate full model performance for this fold
-    # ... (this gives you one performance score per fold)
+    # Combine features
+    train_combined = np.concatenate([train_temp_features, train_spatial_features], axis=1)
+    val_combined = np.concatenate([val_temp_features, val_spatial_features], axis=1)
+    
+    # Train LightGBM meta-learner
+    lightgbm_model = LGBMRegressor(best_lightgbm_params)
+    lightgbm_model.fit(train_combined, train_targets)
+    
+    # Validate on this fold
+    val_predictions = lightgbm_model.predict(val_combined)
+    fold_rmse = np.sqrt(mean_squared_error(val_targets, val_predictions))
+    fold_scores.append(fold_rmse)
+    
+    print(f"  Fold {fold + 1} RMSE: {fold_rmse:.4f}")
+
+# Calculate cross-validation performance
+cv_mean = np.mean(fold_scores)
+cv_std = np.std(fold_scores)
+print(f"5-Fold CV Results: {cv_mean:.4f} ± {cv_std:.4f}")
 """)
     print("="*80)
 
