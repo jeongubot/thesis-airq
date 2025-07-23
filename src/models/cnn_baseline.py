@@ -1,7 +1,6 @@
-"""
-CNN Baseline Feature Extractor using Pretrained Models
-For comparison with CapsNet performance
-"""
+"""CNN Baseline Feature Extractor using Pretrained Models
+For comparison with CapsNet performance"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -13,7 +12,7 @@ class CNNFeatureExtractor(nn.Module):
     CNN Feature Extractor using pretrained models as backbone
     """
     
-    def __init__(self, 
+    def __init__(self,
                  backbone='resnet50',
                  feature_dim=128,
                  pretrained=True,
@@ -135,14 +134,13 @@ class CNNFeatureExtractor(nn.Module):
             backbone_features = self.backbone(x)
             return backbone_features
 
-
 class MultiScaleCNNFeatureExtractor(nn.Module):
     """
     Multi-scale CNN Feature Extractor
     Combines features from multiple scales for richer representation
     """
     
-    def __init__(self, 
+    def __init__(self,
                  backbone='resnet50',
                  feature_dim=128,
                  pretrained=True,
@@ -229,9 +227,8 @@ class MultiScaleCNNFeatureExtractor(nn.Module):
         
         return features
 
-
-def create_cnn_baseline(backbone='resnet50', 
-                       feature_dim=128, 
+def create_cnn_baseline(backbone='resnet50',
+                       feature_dim=128,
                        pretrained=True,
                        freeze_backbone=False,
                        multi_scale=False,
@@ -266,13 +263,12 @@ def create_cnn_baseline(backbone='resnet50',
             **kwargs
         )
 
-
 class CNNEnsembleFeatureExtractor(nn.Module):
     """
     Ensemble of multiple CNN backbones for robust feature extraction
     """
     
-    def __init__(self, 
+    def __init__(self,
                  backbones=['resnet50', 'efficientnet_b0'],
                  feature_dim=128,
                  pretrained=True,
@@ -332,7 +328,6 @@ class CNNEnsembleFeatureExtractor(nn.Module):
             fused_features = torch.stack(features_list, dim=0).mean(dim=0)
         
         return fused_features
-
 
 # Utility functions for model comparison
 def count_parameters(model):

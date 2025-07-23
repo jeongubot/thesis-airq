@@ -1,7 +1,6 @@
-"""
-Complete CapsNet Training, Testing, and Hyperparameter Tuning
-Combined all training-related functionality into one file
-"""
+"""Complete CapsNet Training, Testing, and Hyperparameter Tuning
+Combined all training-related functionality into one file"""
+
 import os
 import sys
 import torch
@@ -18,8 +17,23 @@ import traceback
 from tqdm import tqdm
 from typing import Dict, List, Any, Tuple
 import json
+from datetime import datetime
+import shutil
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Fix imports - use absolute imports
+try:
+    from models.capsnet_model import create_capsnet_feature_extractor
+except ImportError:
+    # Try alternative import path
+    try:
+        import models.capsnet_model as capsnet_model
+        create_capsnet_feature_extractor = capsnet_model.create_capsnet_feature_extractor
+    except ImportError:
+        # Last resort - add current directory to path
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(current_dir)
+        sys.path.insert(0, parent_dir)
+        from models.capsnet_model import create_capsnet_feature_extractor
 
 # Try to import Optuna for hyperparameter tuning (optional)
 try:
@@ -29,9 +43,114 @@ except ImportError:
     OPTUNA_AVAILABLE = False
     print("⚠️ Optuna not available. Hyperparameter tuning will be disabled.")
 
-# Import model
-from models.capsnet_model import create_capsnet_feature_extractor
-
+class OutputManager:
+    """Manages organized output folder structure"""
+    
+    def __init__(self, base_dir="outputs", model_type="capsnet"):
+        self.base_dir = base_dir
+        self.model_type = model_type.lower()
+        self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Create main directory structure
+        self.structure = {
+            'models': f"{base_dir}/{model_type}/models",
+            'features': f"{base_dir}/{model_type}/features", 
+            'plots': f"{base_dir}/{model_type}/plots",
+            'logs': f"{base_dir}/{model_type}/logs",
+            'checkpoints': f"{base_dir}/{model_type}/checkpoints",
+            'hyperparameters': f"{base_dir}/{model_type}/hyperparameters",
+            'metadata': f"{base_dir}/{model_type}/metadata",
+            'experiments': f"{base_dir}/{model_type}/experiments"
+        }
+        
+        # Create all directories
+        self.create_directories()
+        
+        print(f"📁 Output structure created for {model_type.upper()}")
+        print(f"   Base directory: {base_dir}")
+        print(f"   Timestamp: {self.timestamp}")
+    
+    def create_directories(self):
+        """Create all necessary directories"""
+        for folder_type, path in self.structure.items():
+            os.makedirs(path, exist_ok=True)
+            
+        # Create subdirectories for better organization
+        subdirs = {
+            'models': ['best', 'checkpoints', 'final', 'tuned'],
+            'features': ['train', 'val', 'test', 'extracted'],
+            'plots': ['training', 'validation', 'features', 'analysis'],
+            'logs': ['training', 'testing', 'tuning'],
+            'checkpoints': ['trunk', 'epoch', 'best'],
+            'experiments': ['runs', 'comparisons', 'ablations']
+        }
+        
+        for main_dir, sub_dirs in subdirs.items():
+            for sub_dir in sub_dirs:
+                full_path = os.path.join(self.structure[main_dir], sub_dir)
+                os.makedirs(full_path, exist_ok=True)
+    
+    def get_path(self, folder_type, subfolder=None, filename=None, day_folder=None):
+        """Get organized path for different types of outputs"""
+        base_path = self.structure[folder_type]
+        
+        # Add day folder if specified
+        if day_folder:
+            base_path = os.path.join(base_path, day_folder)
+            os.makedirs(base_path, exist_ok=True)
+        
+        # Add subfolder if specified
+        if subfolder:
+            base_path = os.path.join(base_path, subfolder)
+            os.makedirs(base_path, exist_ok=True)
+        
+        # Add filename if specified
+        if filename:
+            # Add timestamp to filename if it doesn't already have one
+            if self.timestamp not in filename:
+                name, ext = os.path.splitext(filename)
+                filename = f"{name}_{self.timestamp}{ext}"
+            base_path = os.path.join(base_path, filename)
+        
+        return base_path
+    
+    def save_experiment_info(self, day_folder, config):
+        """Save experiment configuration and info"""
+        experiment_info = {
+            'timestamp': self.timestamp,
+            'model_type': self.model_type,
+            'day_folder': day_folder,
+            'config': config,
+            'output_structure': self.structure
+        }
+        
+        info_path = self.get_path('experiments', 'runs', f'experiment_{day_folder}_{self.timestamp}.json')
+        with open(info_path, 'w') as f:
+            json.dump(experiment_info, f, indent=2, default=str)
+        
+        print(f"📋 Experiment info saved: {info_path}")
+        return info_path
+    
+    def create_summary_report(self, day_folder, results):
+        """Create a summary report of the experiment"""
+        report_path = self.get_path('experiments', 'runs', f'summary_{day_folder}_{self.timestamp}.md')
+        
+        with open(report_path, 'w') as f:
+            f.write(f"# {self.model_type.upper()} Experiment Summary\n\n")
+            f.write(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"**Day Folder:** {day_folder}\n")
+            f.write(f"**Model Type:** {self.model_type.upper()}\n\n")
+            
+            f.write("## Results\n")
+            for key, value in results.items():
+                f.write(f"- **{key}:** {value}\n")
+            
+            f.write("\n## Output Files\n")
+            for folder_type, path in self.structure.items():
+                f.write(f"- **{folder_type.title()}:** `{path}`\n")
+        
+        print(f"📊 Summary report created: {report_path}")
+        return report_path
 
 def custom_collate_fn(batch):
     """Optimized custom collate function"""
@@ -58,11 +177,9 @@ def custom_collate_fn(batch):
     
     return images, pm25_values, metadata_list
 
-
 class AirQualityDataset(Dataset):
-    """
-    Air Quality Dataset that correctly follows the data flow
-    """
+    """Air Quality Dataset that correctly follows the data flow"""
+    
     def __init__(self, learning_df, patch_metadata_df, day_folder, split_type='learning', transform=None):
         self.learning_df = learning_df.reset_index(drop=True)
         self.patch_metadata_df = patch_metadata_df.reset_index(drop=True)
@@ -134,16 +251,16 @@ class AirQualityDataset(Dataset):
                     })
             else:
                 images_without_patches += 1
+            
+            # Update progress bar with current stats every 10 items
+            if (idx + 1) % 10 == 0:
+                progress_bar.set_postfix({
+                    'mapped': len(mapping),
+                    'with_patches': images_with_patches,
+                    'without': images_without_patches,
+                    'avg_patches_per_img': f"{len(mapping)/max(images_with_patches, 1):.1f}"
+                })
         
-        # Update progress bar with current stats every 10 items
-        if (idx + 1) % 10 == 0:
-            progress_bar.set_postfix({
-                'mapped': len(mapping),
-                'with_patches': images_with_patches,
-                'without': images_without_patches,
-                'avg_patches_per_img': f"{len(mapping)/max(images_with_patches, 1):.1f}"
-            })
-    
         progress_bar.close()
         
         print(f"   ✅ Mapping completed:")
@@ -154,7 +271,7 @@ class AirQualityDataset(Dataset):
             avg_patches = len(mapping) / images_with_patches
             print(f"      Average patches per image: {avg_patches:.1f}")
             print(f"      This means each image has ~{avg_patches:.0f} augmented versions")
-    
+        
         return mapping
     
     def __len__(self):
@@ -192,7 +309,7 @@ class AirQualityDataset(Dataset):
                 image = torch.nn.functional.interpolate(
                     image.unsqueeze(0), size=(256, 256), mode='bilinear', align_corners=False
                 ).squeeze(0)
-            
+        
         except Exception as e:
             print(f"❌ Error loading {npy_path}: {e}")
             # Return dummy data as fallback
@@ -207,16 +324,202 @@ class AirQualityDataset(Dataset):
         
         return image, pm25, data_entry
 
+import gc
+import psutil
+import time
+from typing import Optional
+
+class TrunkAirQualityDataset(Dataset):
+    """Memory-efficient dataset that loads data in trunks"""
+    
+    def __init__(self, learning_df, patch_metadata_df, day_folder, trunk_size=10000, split_type='learning', transform=None, max_patches_per_image=50):
+        self.learning_df = learning_df.reset_index(drop=True)
+        self.patch_metadata_df = patch_metadata_df.reset_index(drop=True)
+        self.day_folder = day_folder
+        self.trunk_size = trunk_size
+        self.split_type = split_type
+        self.transform = transform
+        self.max_patches_per_image = max_patches_per_image  # NEW: Limit patches per image
+        
+        # Filter patch metadata for this specific day
+        self.day_patches = self.patch_metadata_df[
+            self.patch_metadata_df['day'] == day_folder
+        ].reset_index(drop=True)
+        
+        print(f"📊 TrunkDataset initialization for {day_folder} ({split_type}):")
+        print(f"   Input learning data: {len(self.learning_df)} entries")
+        print(f"   Available patches for day: {len(self.day_patches)} patches")
+        print(f"   Max patches per image: {max_patches_per_image}")
+        
+        # Pre-group patches by image filename for faster lookup
+        self.patches_by_image = self.day_patches.groupby('image_filename')
+        
+        # Calculate total samples with sampling
+        self.total_samples = self._calculate_total_samples_with_sampling()
+        self.num_trunks = max(1, (self.total_samples + trunk_size - 1) // trunk_size)
+        
+        print(f"   Total samples (after sampling): {self.total_samples:,}")
+        print(f"   Trunk size: {trunk_size:,}")
+        print(f"   Number of trunks: {self.num_trunks}")
+        print(f"   Estimated training time: {self.num_trunks * 0.5:.1f} hours (at 30min/trunk)")
+        
+        # Current trunk data
+        self.current_trunk = 0
+        self.current_trunk_data = []
+        if self.total_samples > 0:
+            self._load_trunk(0)
+
+    def _calculate_total_samples_with_sampling(self):
+        """Calculate total samples with intelligent sampling"""
+        total = 0
+        for _, learning_row in self.learning_df.iterrows():
+            image_filename = learning_row['image_filename']
+            if image_filename in self.patches_by_image.groups:
+                image_patches = self.patches_by_image.get_group(image_filename)
+                # Limit patches per image to reduce redundancy
+                patches_to_use = min(len(image_patches), self.max_patches_per_image)
+                total += patches_to_use
+        return total
+
+    def _load_trunk(self, trunk_idx):
+        """Load a specific trunk of data with sampling"""
+        if self.total_samples == 0:
+            self.current_trunk_data = []
+            return
+            
+        print(f"📦 Loading trunk {trunk_idx + 1}/{self.num_trunks}...")
+        
+        start_idx = trunk_idx * self.trunk_size
+        end_idx = min(start_idx + self.trunk_size, self.total_samples)
+        
+        self.current_trunk_data = []
+        current_sample_idx = 0
+        
+        # Create mapping for this trunk with sampling
+        for _, learning_row in self.learning_df.iterrows():
+            image_filename = learning_row['image_filename']
+            
+            if image_filename in self.patches_by_image.groups:
+                image_patches = self.patches_by_image.get_group(image_filename)
+                
+                # Sample patches intelligently - take diverse augmentations
+                if len(image_patches) > self.max_patches_per_image:
+                    # Sample evenly across different augmentation types
+                    sampled_patches = image_patches.sample(n=self.max_patches_per_image, random_state=42)
+                else:
+                    sampled_patches = image_patches
+                
+                for _, patch_row in sampled_patches.iterrows():
+                    if start_idx <= current_sample_idx < end_idx:
+                        self.current_trunk_data.append({
+                            # From learning data
+                            'image_filename': image_filename,
+                            'timestamp': learning_row['timestamp'],
+                            'pm2.5': float(learning_row['pm2.5']),
+                            'pm10': float(learning_row.get('pm10', 0)),
+                            'temperature': float(learning_row.get('temperature', 0)),
+                            'humidity': float(learning_row.get('humidity', 0)),
+                            'location': learning_row.get('location', 'unknown'),
+                            
+                            # From patch metadata
+                            'patch_idx': int(patch_row['patch_idx']),
+                            'augmentations': patch_row['augmentations'],
+                            'npy_path': patch_row['npy_path']
+                        })
+                    
+                    current_sample_idx += 1
+                    
+                    if current_sample_idx >= end_idx:
+                        break
+            
+            if current_sample_idx >= end_idx:
+                break
+        
+        self.current_trunk = trunk_idx
+        print(f"   ✅ Loaded {len(self.current_trunk_data):,} samples for trunk {trunk_idx + 1}")
+        
+        # Force garbage collection
+        gc.collect()
+    
+    def get_trunk_count(self):
+        """Get total number of trunks"""
+        return self.num_trunks
+    
+    def load_next_trunk(self):
+        """Load next trunk if available"""
+        if self.current_trunk + 1 < self.num_trunks:
+            self._load_trunk(self.current_trunk + 1)
+            return True
+        return False
+    
+    def get_memory_usage(self):
+        """Get current memory usage in MB"""
+        process = psutil.Process(os.getpid())
+        return process.memory_info().rss / 1024 / 1024
+    
+    def __len__(self):
+        return len(self.current_trunk_data)
+    
+    def __getitem__(self, idx):
+        if idx >= len(self.current_trunk_data):
+            raise IndexError(f"Index {idx} out of range for current trunk")
+        
+        data_entry = self.current_trunk_data[idx]
+        
+        # Load preprocessed .npy file
+        npy_path = data_entry['npy_path']
+        if not os.path.isabs(npy_path):
+            npy_path = os.path.join('dataset', 'e_preprocessed_img', npy_path)
+        
+        try:
+            image_data = np.load(npy_path)
+            
+            # Ensure correct format: (C, H, W)
+            if len(image_data.shape) == 3:
+                if image_data.shape[0] == 3:  # Already CHW
+                    image = torch.FloatTensor(image_data)
+                elif image_data.shape[2] == 3:  # HWC -> CHW
+                    image = torch.FloatTensor(image_data).permute(2, 0, 1)
+                else:
+                    raise ValueError(f"Unexpected image shape: {image_data.shape}")
+            else:
+                raise ValueError(f"Expected 3D image, got shape: {image_data.shape}")
+            
+            # Normalize if needed
+            if image.max() > 1.0:
+                image = image / 255.0
+            
+            # Ensure correct size (256x256)
+            if image.shape[1] != 256 or image.shape[2] != 256:
+                image = torch.nn.functional.interpolate(
+                    image.unsqueeze(0), size=(256, 256), mode='bilinear', align_corners=False
+                ).squeeze(0)
+        
+        except Exception as e:
+            print(f"❌ Error loading {npy_path}: {e}")
+            # Return dummy data as fallback
+            image = torch.zeros(3, 256, 256, dtype=torch.float32)
+        
+        # Get PM2.5 target
+        pm25_val = data_entry['pm2.5']
+        if pd.isna(pm25_val) or pm25_val <= 0:
+            pm25_val = 1.0  # Fallback value
+        
+        pm25 = torch.FloatTensor([pm25_val])
+        
+        return image, pm25, data_entry
 
 class CapsNetTrainer:
-    """
-    Complete CapsNet Trainer with training, testing, and hyperparameter tuning
-    """
+    """Complete CapsNet Trainer with training, testing, and hyperparameter tuning"""
     
-    def __init__(self, input_size=256, feature_dim=128, device='cuda'):
+    def __init__(self, input_size=256, feature_dim=128, device='cuda', model_type='capsnet'):
         self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
         self.input_size = input_size
         self.feature_dim = feature_dim
+        self.model_type = model_type
+        
+        # Initialize output manager
+        self.output_manager = OutputManager(model_type=model_type)
         
         print(f"🚀 CapsNet Trainer")
         print(f"   Device: {self.device}")
@@ -362,6 +665,43 @@ class CapsNetTrainer:
         
         return train_dataset, val_dataset, learning_df, patch_metadata_df
     
+    def prepare_trunk_data(self, day_folder, trunk_size=10000, test_size=0.2):
+        """Prepare trunk-based training and validation data"""
+        print(f"🔄 Preparing trunk data for {day_folder}...")
+        print(f"   Trunk size: {trunk_size:,}")
+        
+        learning_df, patch_metadata_df = self.load_day_data(day_folder)
+        
+        # Check if separate test file exists
+        test_path = f"dataset/d_data_split/{day_folder}/test.csv"
+        if os.path.exists(test_path):
+            print(f"   📂 Using pre-split test data from {test_path}")
+            # Use pre-split test data
+            test_df = pd.read_csv(test_path)
+            test_df = test_df.dropna(subset=['pm2.5'])
+            test_df = test_df[test_df['pm2.5'] > 0]
+            test_df = test_df[test_df['pm2.5'] < 500]
+            
+            print(f"   🔄 Creating trunk training dataset...")
+            train_dataset = TrunkAirQualityDataset(learning_df, patch_metadata_df, day_folder, trunk_size, 'learning')
+            print(f"   🔄 Creating validation dataset...")
+            val_dataset = AirQualityDataset(test_df, patch_metadata_df, day_folder, 'test')
+        else:
+            print(f"   📂 Splitting learning data ({test_size*100:.0f}% for validation)")
+            # Split learning data
+            train_df, val_df = train_test_split(learning_df, test_size=test_size, random_state=42)
+            
+            print(f"   🔄 Creating trunk training dataset...")
+            train_dataset = TrunkAirQualityDataset(train_df, patch_metadata_df, day_folder, trunk_size, 'train')
+            print(f"   🔄 Creating validation dataset...")
+            val_dataset = AirQualityDataset(val_df, patch_metadata_df, day_folder, 'val')
+        
+        print(f"✅ Trunk data preparation complete:")
+        print(f"   Training samples: {train_dataset.total_samples:,} (in {train_dataset.get_trunk_count()} trunks)")
+        print(f"   Validation samples: {len(val_dataset)}")
+        
+        return train_dataset, val_dataset, learning_df, patch_metadata_df
+    
     def train_epoch(self, dataloader, gradient_clip_norm=1.0):
         """Training epoch"""
         self.feature_extractor.train()
@@ -386,7 +726,7 @@ class CapsNetTrainer:
                 
                 # Extract features and predict
                 features = self.feature_extractor(batch_images)
-                pred = self.temp_regressor(features)
+                pred = self.temp_regressor(features)                
                 loss = self.criterion(pred.squeeze(), batch_targets.squeeze())
                 
                 if torch.isnan(loss):
@@ -480,13 +820,28 @@ class CapsNetTrainer:
         
         return avg_loss, {'rmse': rmse, 'mae': mae, 'r2': r2}
     
-    def train(self, train_dataset, val_dataset, epochs=30, batch_size=8, **training_params):
-        """Main training loop"""
+    def train(self, train_dataset, val_dataset, epochs=30, batch_size=8, day_folder=None, **training_params):
+        """Main training loop with organized outputs"""
         print(f"🚀 Starting CapsNet training...")
         print(f"   Epochs: {epochs}")
         print(f"   Batch size: {batch_size}")
         print(f"   Training samples: {len(train_dataset)}")
         print(f"   Validation samples: {len(val_dataset)}")
+        
+        # Save experiment configuration
+        config = {
+            'epochs': epochs,
+            'batch_size': batch_size,
+            'training_samples': len(train_dataset),
+            'validation_samples': len(val_dataset),
+            'feature_dim': self.feature_dim,
+            'input_size': self.input_size,
+            'device': str(self.device),
+            **training_params
+        }
+        
+        if day_folder:
+            self.output_manager.save_experiment_info(day_folder, config)
         
         # Create data loaders
         train_loader = DataLoader(
@@ -549,28 +904,59 @@ class CapsNetTrainer:
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
                     patience_counter = 0
-                    self.save_model('best_capsnet_feature_extractor.pth', epoch, val_loss)
+                    
+                    # Save best model with organized path
+                    best_model_path = self.output_manager.get_path(
+                        'models', 'best', f'best_capsnet_{day_folder}.pth', day_folder
+                    )
+                    self.save_model(best_model_path, epoch, val_loss)
                     print("✅ New best model saved!")
                 else:
                     patience_counter += 1
                     print(f"No improvement for {patience_counter} epochs")
-                    
-                    if patience_counter >= patience:
-                        print(f"🛑 Early stopping at epoch {epoch+1}")
-                        break
-                        
+                
+                if patience_counter >= patience:
+                    print(f"🛑 Early stopping at epoch {epoch+1}")
+                    break
+                
+                # Save epoch checkpoint
+                if epoch % 5 == 0:  # Save every 5 epochs
+                    checkpoint_path = self.output_manager.get_path(
+                        'checkpoints', 'epoch', f'checkpoint_epoch_{epoch+1}_{day_folder}.pth', day_folder
+                    )
+                    self.save_model(checkpoint_path, epoch, val_loss)
+                
             except Exception as e:
                 print(f"❌ Error in epoch {epoch+1}: {e}")
                 traceback.print_exc()
                 continue
         
+        # Save final model
+        final_model_path = self.output_manager.get_path(
+            'models', 'final', f'final_capsnet_{day_folder}.pth', day_folder
+        )
+        self.save_model(final_model_path, epochs, best_val_loss)
+        
         print("\n🎉 Training completed!")
         print(f"Best validation loss: {best_val_loss:.4f}")
         
+        # Create summary report
+        results = {
+            'best_val_loss': best_val_loss,
+            'total_epochs': len(self.train_losses),
+            'final_train_loss': self.train_losses[-1] if self.train_losses else 'N/A',
+            'final_val_loss': self.val_losses[-1] if self.val_losses else 'N/A',
+            'best_model_path': best_model_path,
+            'final_model_path': final_model_path
+        }
+        
+        if day_folder:
+            self.output_manager.create_summary_report(day_folder, results)
+        
         return best_val_loss
     
-    def extract_features(self, dataset, batch_size=16):
-        """Extract features using trained model"""
+    def extract_features(self, dataset, batch_size=16, day_folder=None, split_name='train'):
+        """Extract features using trained model with organized outputs"""
         print(f"🔍 Extracting features from {len(dataset)} samples...")
         
         self.feature_extractor.eval()
@@ -603,10 +989,30 @@ class CapsNetTrainer:
                     continue
         
         print(f"✅ Extracted {len(all_features)} feature vectors")
+        
+        # Save features with organized paths
+        if day_folder:
+            features_path = self.output_manager.get_path(
+                'features', split_name, f'capsnet_{split_name}_features_{day_folder}.npy', day_folder
+            )
+            metadata_path = self.output_manager.get_path(
+                'metadata', split_name, f'capsnet_{split_name}_metadata_{day_folder}.csv', day_folder
+            )
+            
+            # Save features
+            np.save(features_path, all_features)
+            pd.DataFrame(all_metadata).to_csv(metadata_path, index=False)
+            
+            print(f"💾 Features saved: {features_path}")
+            print(f"💾 Metadata saved: {metadata_path}")
+        
         return all_features, all_metadata
     
     def save_model(self, filepath, epoch, val_loss):
         """Save trained model"""
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        
         torch.save({
             'epoch': epoch,
             'model_state_dict': self.feature_extractor.state_dict(),
@@ -627,11 +1033,22 @@ class CapsNetTrainer:
         print(f"📂 Model loaded from {filepath}")
         return checkpoint
     
-    def plot_training_history(self, save_path='capsnet_training_history.png'):
-        """Plot training history"""
+    def plot_training_history(self, save_path=None, day_folder=None):
+        """Plot training history with organized output"""
         if not self.train_losses:
             print("No training history to plot")
             return
+        
+        # Use organized path if not specified
+        if save_path is None and day_folder:
+            save_path = self.output_manager.get_path(
+                'plots', 'training', f'training_history_{day_folder}.png', day_folder
+            )
+        elif save_path is None:
+            save_path = 'capsnet_training_history.png'
+        
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
         
@@ -700,12 +1117,12 @@ class CapsNetTrainer:
             
             # Test training loop
             print("3. Testing training loop...")
-            best_loss = self.train(train_dataset, val_dataset, epochs=max_epochs, batch_size=4)
+            best_loss = self.train(train_dataset, val_dataset, epochs=max_epochs, batch_size=4, day_folder=day_folder)
             print(f"   ✅ Training completed, best loss: {best_loss:.4f}")
             
             # Test feature extraction
             print("4. Testing feature extraction...")
-            features, metadata = self.extract_features(train_dataset, batch_size=4)
+            features, metadata = self.extract_features(train_dataset, batch_size=4, day_folder=day_folder, split_name='test')
             print(f"   ✅ Features extracted: {len(features)} samples")
             
             print("\n🎯 Quick test PASSED! Pipeline is working correctly.")
@@ -716,140 +1133,70 @@ class CapsNetTrainer:
             traceback.print_exc()
             return False
     
-    # HYPERPARAMETER TUNING (if Optuna is available)
-    def hyperparameter_tune(self, day_folder, n_trials=50, max_epochs=25):
-        """Run hyperparameter tuning using Optuna"""
-        if not OPTUNA_AVAILABLE:
-            print("❌ Optuna not available. Cannot run hyperparameter tuning.")
-            return None
+    def quick_test_trunk(self, day_folder, max_samples=50, max_epochs=3, trunk_size=1000):
+        """Quick test of the trunk-based pipeline"""
+        print(f"\n🧪 Quick Trunk Test for {day_folder}")
+        print("=" * 50)
         
-        print(f"🔍 Starting hyperparameter tuning for {day_folder}")
-        print(f"   Trials: {n_trials}")
-        print(f"   Max epochs per trial: {max_epochs}")
-        
-        # Load data once
-        learning_df, patch_metadata_df = self.load_day_data(day_folder)
-        
-        # Limit data for faster tuning
-        if len(learning_df) > 1000:
-            learning_df = learning_df.sample(n=1000, random_state=42)
-        
-        def objective(trial):
-            """Optuna objective function"""
-            try:
-                # Suggest hyperparameters
-                params = {
-                    'feature_dim': trial.suggest_categorical('feature_dim', [64, 128, 256]),
-                    'dropout_rate': trial.suggest_float('dropout_rate', 0.1, 0.5),
-                    'learning_rate': trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True),
-                    'weight_decay': trial.suggest_float('weight_decay', 1e-6, 1e-3, log=True),
-                    'batch_size': trial.suggest_categorical('batch_size', [4, 8, 16]),
-                    'optimizer_type': trial.suggest_categorical('optimizer_type', ['adam', 'adamw']),
-                    'gradient_clip_norm': trial.suggest_float('gradient_clip_norm', 0.5, 2.0),
-                    'early_stopping_patience': trial.suggest_int('early_stopping_patience', 5, 15),
-                }
-                
-                # Create datasets
-                full_dataset = AirQualityDataset(learning_df, patch_metadata_df, day_folder, 'learning')
-                
-                # Simple train/val split for tuning
-                dataset_size = len(full_dataset)
-                train_size = int(0.8 * dataset_size)
-                val_size = dataset_size - train_size
-                train_dataset, val_dataset = torch.utils.data.random_split(
-                    full_dataset, [train_size, val_size]
-                )
-                
-                # Create trainer for this trial
-                trial_trainer = CapsNetTrainer(
-                    input_size=self.input_size,
-                    feature_dim=params['feature_dim'],
-                    device=self.device.type
-                )
-                
-                # Create model with trial parameters
-                trial_trainer.create_model(dropout_rate=params['dropout_rate'])
-                trial_trainer.setup_training(
-                    learning_rate=params['learning_rate'],
-                    weight_decay=params['weight_decay'],
-                    optimizer_type=params['optimizer_type']
-                )
-                
-                # Train with trial parameters
-                best_val_loss = trial_trainer.train(
-                    train_dataset, val_dataset,
-                    epochs=max_epochs,
-                    batch_size=params['batch_size'],
-                    gradient_clip_norm=params['gradient_clip_norm'],
-                    early_stopping_patience=params['early_stopping_patience']
-                )
-                
-                return best_val_loss
-                
-            except Exception as e:
-                print(f"Trial failed: {e}")
-                return float('inf')
-        
-        # Create study and optimize
-        study = optuna.create_study(direction='minimize')
-        study.optimize(objective, n_trials=n_trials)
-        
-        # Get best parameters
-        best_params = study.best_params
-        best_score = study.best_value
-        
-        print(f"\n🎯 Hyperparameter tuning completed!")
-        print(f"   Best score: {best_score:.4f}")
-        print(f"   Best parameters:")
-        for key, value in best_params.items():
-            print(f"     {key}: {value}")
-        
-        # Save results
-        results = {
-            'best_params': best_params,
-            'best_score': best_score,
-            'day_folder': day_folder,
-            'n_trials': n_trials
-        }
-        
-        results_path = f"hyperparameter_results_{day_folder}.json"
-        with open(results_path, 'w') as f:
-            json.dump(results, f, indent=2)
-        
-        print(f"📁 Results saved to: {results_path}")
-        
-        return best_params
-    
-    def train_with_best_params(self, day_folder, best_params, epochs=50):
-        """Train final model with best hyperparameters"""
-        print(f"🏆 Training final model with best parameters...")
-        
-        # Update trainer with best parameters
-        self.feature_dim = best_params.get('feature_dim', self.feature_dim)
-        
-        # Prepare data
-        train_dataset, val_dataset, _, _ = self.prepare_data(day_folder)
-        
-        # Create model with best parameters
-        self.create_model(dropout_rate=best_params.get('dropout_rate', 0.3))
-        self.setup_training(
-            learning_rate=best_params.get('learning_rate', 0.001),
-            weight_decay=best_params.get('weight_decay', 1e-4),
-            optimizer_type=best_params.get('optimizer_type', 'adam')
-        )
-        
-        # Train with best parameters
-        best_val_loss = self.train(
-            train_dataset, val_dataset,
-            epochs=epochs,
-            batch_size=best_params.get('batch_size', 8),
-            gradient_clip_norm=best_params.get('gradient_clip_norm', 1.0),
-            early_stopping_patience=best_params.get('early_stopping_patience', 10)
-        )
-        
-        # Save final model
-        final_model_path = f"best_capsnet_tuned_{day_folder}.pth"
-        self.save_model(final_model_path, epochs, best_val_loss)
-        
-        print(f"🎉 Final model saved to: {final_model_path}")
-        return final_model_path
+        try:
+            # Test trunk data loading
+            print("1. Testing trunk data loading...")
+            trunk_train_dataset, val_dataset, _, _ = self.prepare_trunk_data(
+                day_folder, trunk_size=trunk_size
+            )
+            
+            # Limit validation dataset for testing
+            if len(val_dataset) > max_samples:
+                indices = torch.randperm(len(val_dataset))[:max_samples]
+                val_dataset = torch.utils.data.Subset(val_dataset, indices)
+            
+            print(f"   ✅ Data loaded: {trunk_train_dataset.total_samples} train (in {trunk_train_dataset.get_trunk_count()} trunks), {len(val_dataset)} val")
+            
+            # Test model creation
+            print("2. Testing model creation...")
+            self.create_model()
+            self.setup_training()
+            print("   ✅ Model created successfully")
+            
+            # Test trunk training loop - simplified for testing
+            print("3. Testing trunk training loop...")
+            
+            # Create data loaders for testing
+            train_loader = DataLoader(
+                trunk_train_dataset,
+                batch_size=4,
+                shuffle=True,
+                num_workers=0,
+                collate_fn=custom_collate_fn,
+                drop_last=True
+            )
+            
+            val_loader = DataLoader(
+                val_dataset,
+                batch_size=4,
+                shuffle=False,
+                num_workers=0,
+                collate_fn=custom_collate_fn
+            )
+            
+            # Simple training test
+            for epoch in range(max_epochs):
+                train_loss, train_metrics = self.train_epoch(train_loader, 1.0)
+                val_loss, val_metrics = self.validate_epoch(val_loader)
+                print(f"   Epoch {epoch+1}: Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            
+            print(f"   ✅ Trunk training completed, final val loss: {val_loss:.4f}")
+            
+            # Test feature extraction
+            print("4. Testing feature extraction...")
+            # Use first trunk for feature extraction test
+            features, metadata = self.extract_features(trunk_train_dataset, batch_size=4, day_folder=day_folder, split_name='trunk_test')
+            print(f"   ✅ Features extracted: {len(features)} samples")
+            
+            print("\n🎯 Quick trunk test PASSED! Pipeline is working correctly.")
+            return True
+            
+        except Exception as e:
+            print(f"\n❌ Quick trunk test FAILED: {e}")
+            traceback.print_exc()
+            return False
